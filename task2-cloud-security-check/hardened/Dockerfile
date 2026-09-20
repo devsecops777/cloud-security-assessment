@@ -15,9 +15,10 @@ RUN python -m venv /opt/venv \
 
 FROM python:3.12.7-slim-bookworm AS runtime
 
+ARG CURL_VERSION=7.88.1-10+deb12u15
 RUN apt-get update \
  && apt-get upgrade -y --no-install-recommends \
- && apt-get install -y --no-install-recommends curl \
+ && apt-get install -y --no-install-recommends curl=${CURL_VERSION} \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 

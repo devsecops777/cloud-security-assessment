@@ -170,7 +170,7 @@ Resources:
               Bool:
                 "aws:SecureTransport": "false"
 
-DataBucket:
+  DataBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain

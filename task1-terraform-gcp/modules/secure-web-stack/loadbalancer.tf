@@ -63,6 +63,19 @@ resource "google_compute_security_policy" "web" {
   }
 
   rule {
+    action   = "deny(403)"
+    priority = 1003
+
+    match {
+      expr {
+        expression = "evaluatePreconfiguredExpr('cve-canary')"
+      }
+    }
+
+    description = "Block Log4j2 JNDI message-lookup exploitation attempts."
+  }
+
+  rule {
     action   = "allow"
     priority = 2147483647
 

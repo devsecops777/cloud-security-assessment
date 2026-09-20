@@ -6,8 +6,13 @@ resource "google_compute_instance" "web" {
   tags         = [local.web_tag]
   labels       = var.labels
 
+  # Without the key grant in place first, instance creation fails.
+  depends_on = [google_kms_crypto_key_iam_member.compute]
+
   boot_disk {
     auto_delete = true
+
+    kms_key_self_link = google_kms_crypto_key.boot_disk.id
 
     initialize_params {
       image  = var.boot_image
