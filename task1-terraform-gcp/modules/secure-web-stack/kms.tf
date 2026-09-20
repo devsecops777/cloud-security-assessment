@@ -19,7 +19,7 @@ resource "google_kms_crypto_key" "boot_disk" {
   rotation_period = "7776000s"
 
   lifecycle {
-      prevent_destroy = true
+    prevent_destroy = true
   }
 }
 
