@@ -1,0 +1,320 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  BucketBaseName:
+    Type: String
+    Description: Base name for the data bucket. Account ID and region are appended for global uniqueness.
+    AllowedPattern: "^[a-z0-9][a-z0-9-]{1,40}[a-z0-9]$"
+    Default: app-data
+
+  TrustedPrincipalArn:
+    Type: String
+    Description: >-
+      ARN of the principal permitted to assume the access role (a workload role,
+      an IAM Identity Center permission set, or a CI OIDC role).
+    AllowedPattern: "^arn:aws[a-zA-Z-]*:iam::[0-9]{12}:(root|role/.+|user/.+)$"
+
+  KeyAdministratorArn:
+    Type: String
+    Description: >-
+      Optional. ARN of the only principal permitted to disable the CMK or
+      schedule its deletion. When set, an explicit Deny blocks those actions for
+      everyone else, including principals whose IAM policy would otherwise allow
+      them. Leave empty to rely on IAM alone.
+    Default: ""
+
+  AllowedSourceVpce:
+    Type: String
+    Description: Optional VPC endpoint ID. When set, bucket access is confined to traffic arriving through it.
+    Default: ""
+
+Conditions:
+  HasVpceRestriction: !Not [!Equals [!Ref AllowedSourceVpce, ""]]
+  HasKeyAdministrator: !Not [!Equals [!Ref KeyAdministratorArn, ""]]
+
+Resources:
+  DataKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub "CMK for ${BucketBaseName} objects"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action:
+              - "kms:CreateAlias"
+              - "kms:Describe*"
+              - "kms:Enable*"
+              - "kms:List*"
+              - "kms:Put*"
+              - "kms:Update*"
+              - "kms:Revoke*"
+              - "kms:Disable*"
+              - "kms:Get*"
+              - "kms:Delete*"
+              - "kms:TagResource"
+              - "kms:UntagResource"
+              - "kms:ScheduleKeyDeletion"
+              - "kms:CancelKeyDeletion"
+            Resource: "*"
+          - Sid: KeyUsageByDataAccessRole
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt DataAccessRole.Arn
+            Action:
+              - "kms:Decrypt"
+              - "kms:GenerateDataKey"
+              - "kms:DescribeKey"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "s3.${AWS::Region}.amazonaws.com"
+          - !If
+            - HasKeyAdministrator
+            - Sid: DenyKeyDestructionExceptByAdministrator
+              Effect: Deny
+              Principal: "*"
+              Action:
+                - "kms:ScheduleKeyDeletion"
+                - "kms:DisableKey"
+                - "kms:DisableKeyRotation"
+              Resource: "*"
+              Condition:
+                ArnNotEquals:
+                  "aws:PrincipalArn": !Ref KeyAdministratorArn
+            - !Ref AWS::NoValue
+          - Sid: AllowS3ServiceUse
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action:
+              - "kms:Decrypt"
+              - "kms:GenerateDataKey"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+                "aws:SourceArn": !Sub "arn:${AWS::Partition}:s3:::${BucketBaseName}-${AWS::AccountId}-${AWS::Region}"
+
+  DataKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${BucketBaseName}-data"
+      TargetKeyId: !Ref DataKey
+
+  LogBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_18
+            comment: "This is the access-log destination, a bucket cannot log to itself."
+    Properties:
+      BucketName: !Sub "${BucketBaseName}-logs-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-logs
+            Status: Enabled
+            ExpirationInDays: 365
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  LogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowS3ServerAccessLogging
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action: "s3:PutObject"
+            Resource: !Sub "${LogBucket.Arn}/s3-access-logs/*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt LogBucket.Arn
+              - !Sub "${LogBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
+DataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${BucketBaseName}-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref DataKey
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LogBucket
+        LogFilePrefix: s3-access-logs/
+      LifecycleConfiguration:
+        Rules:
+          - Id: tidy-noncurrent-and-incomplete
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 180
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      Tags:
+        - Key: DataClassification
+          Value: confidential
+
+  DataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DataBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt DataBucket.Arn
+              - !Sub "${DataBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+          - Sid: DenyUnencryptedObjectUploads
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${DataBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                "s3:x-amz-server-side-encryption": "aws:kms"
+          - Sid: DenyWrongKey
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${DataBucket.Arn}/*"
+            Condition:
+              StringNotEqualsIfExists:
+                "s3:x-amz-server-side-encryption-aws-kms-key-id": !GetAtt DataKey.Arn
+          - !If
+            - HasVpceRestriction
+            - Sid: DenyOutsideVpce
+              Effect: Deny
+              Principal: "*"
+              Action: "s3:*"
+              Resource:
+                - !GetAtt DataBucket.Arn
+                - !Sub "${DataBucket.Arn}/*"
+              Condition:
+                StringNotEquals:
+                  "aws:SourceVpce": !Ref AllowedSourceVpce
+            - !Ref AWS::NoValue
+
+  DataAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${BucketBaseName}-data-access"
+      Description: Scoped read/write access to the data bucket. No console, no keys.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref TrustedPrincipalArn
+            Action: "sts:AssumeRole"
+            Condition:
+              Bool:
+                "aws:MultiFactorAuthPresent": "true"
+              StringEquals:
+                "aws:PrincipalAccount": !Ref AWS::AccountId
+      Tags:
+        - Key: ManagedBy
+          Value: cloudformation
+
+  DataAccessPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: data-bucket-access
+      Roles:
+        - !Ref DataAccessRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ListOwnBucketOnly
+            Effect: Allow
+            Action:
+              - "s3:ListBucket"
+              - "s3:GetBucketLocation"
+            Resource: !GetAtt DataBucket.Arn
+          - Sid: ObjectReadWriteNoDelete
+            Effect: Allow
+            Action:
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+              - "s3:PutObject"
+            Resource: !Sub "${DataBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "true"
+
+Outputs:
+  DataBucketName:
+    Description: Name of the private, encrypted data bucket.
+    Value: !Ref DataBucket
+
+  LogBucketName:
+    Description: Bucket receiving S3 server access logs.
+    Value: !Ref LogBucket
+
+  DataAccessRoleArn:
+    Description: Role to assume for bucket access. Issues short-lived credentials only.
+    Value: !GetAtt DataAccessRole.Arn
+
+  KmsKeyArn:
+    Description: CMK protecting objects in the data bucket.
+    Value: !GetAtt DataKey.Arn

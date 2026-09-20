@@ -1,0 +1,120 @@
+{
+  "_comment": "Recorded API shapes. Compliant resources are included on purpose: the fixture provider runs the real evaluation logic, so a bug that stopped filtering would change the golden output in testdata/expected-report.json.",
+  "aws": {
+    "regions": {
+      "us-east-1": [
+        {
+          "id": "sg-12345678",
+          "name": "open-sg",
+          "ingress": [
+            { "protocol": "tcp", "from_port": 8080, "to_port": 8080, "ipv4_ranges": ["0.0.0.0/0"] },
+            { "protocol": "udp", "from_port": 123, "to_port": 123, "ipv4_ranges": ["0.0.0.0/0"] }
+          ]
+        },
+        {
+          "id": "sg-0aa11bb22cc33dd44",
+          "name": "app-tier-sg",
+          "ingress": [
+            { "protocol": "tcp", "from_port": 443, "to_port": 443, "ipv4_ranges": ["10.0.0.0/8"] },
+            { "protocol": "tcp", "from_port": 22, "to_port": 22, "ipv4_ranges": ["203.0.113.0/24"] }
+          ]
+        },
+        {
+          "id": "sg-0ee55ff66aa77bb88",
+          "name": "legacy-sg",
+          "ingress": [
+            { "protocol": "-1", "ipv4_ranges": ["192.168.0.0/16"] }
+          ]
+        }
+      ]
+    }
+  },
+  "gcp": {
+    "projects": {
+      "my-project": [
+        {
+          "name": "allow-all",
+          "network": "default",
+          "direction": "INGRESS",
+          "disabled": false,
+          "source_ranges": ["0.0.0.0/0"],
+          "allowed": [{ "protocol": "icmp" }]
+        },
+        {
+          "name": "allow-lb-health-checks",
+          "network": "default",
+          "direction": "INGRESS",
+          "disabled": false,
+          "source_ranges": ["130.211.0.0/22", "35.191.0.0/16"],
+          "allowed": [{ "protocol": "tcp", "ports": ["80"] }]
+        },
+        {
+          "name": "disabled-open-rule",
+          "network": "default",
+          "direction": "INGRESS",
+          "disabled": true,
+          "source_ranges": ["0.0.0.0/0"],
+          "allowed": [{ "protocol": "tcp", "ports": ["3389"] }]
+        },
+        {
+          "name": "allow-egress-anywhere",
+          "network": "default",
+          "direction": "EGRESS",
+          "disabled": false,
+          "source_ranges": ["0.0.0.0/0"],
+          "allowed": [{ "protocol": "all" }]
+        }
+      ]
+    }
+  },
+  "azure": {
+    "subscriptions": {
+      "xxxx": [
+        {
+          "id": "/subscriptions/xxxx/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-nsg",
+          "name": "open-nsg",
+          "security_rules": [
+            {
+              "name": "AllowAnyCustomAnyInbound",
+              "direction": "Inbound",
+              "access": "Allow",
+              "protocol": "*",
+              "destination_port_range": "*",
+              "source_address_prefix": "0.0.0.0/0"
+            }
+          ]
+        },
+        {
+          "id": "/subscriptions/xxxx/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/app-nsg",
+          "name": "app-nsg",
+          "security_rules": [
+            {
+              "name": "DenyRdpFromInternet",
+              "direction": "Inbound",
+              "access": "Deny",
+              "protocol": "Tcp",
+              "destination_port_range": "3389",
+              "source_address_prefix": "Internet"
+            },
+            {
+              "name": "AllowHttpsFromVnet",
+              "direction": "Inbound",
+              "access": "Allow",
+              "protocol": "Tcp",
+              "destination_port_range": "443",
+              "source_address_prefix": "VirtualNetwork"
+            },
+            {
+              "name": "AllowOutboundAnywhere",
+              "direction": "Outbound",
+              "access": "Allow",
+              "protocol": "*",
+              "destination_port_range": "*",
+              "source_address_prefix": "*"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

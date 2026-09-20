@@ -1,0 +1,160 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, because a dependency audit ages out even when nothing is committed.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: Terraform (fmt, validate, checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Format check
+        run: terraform fmt -check -recursive task1-terraform-gcp
+
+      - name: Validate module
+        working-directory: task1-terraform-gcp/examples
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: task1-terraform-gcp
+          framework: terraform
+          soft_fail: false
+          output_format: cli,sarif
+          output_file_path: console,checkov-terraform.sarif
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov-terraform.sarif
+          category: checkov-terraform
+
+  cloudformation:
+    name: CloudFormation (cfn-lint, checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install cfn-lint checkov
+
+      # Only the hardened template is expected to pass. vulnerable/ is kept as
+      # the "before" evidence and is excluded on purpose.
+      - name: cfn-lint
+        run: cfn-lint task2-cloud-security-check/hardened/template.yaml
+
+      - name: Checkov
+        run: |
+          checkov -f task2-cloud-security-check/hardened/template.yaml \
+            --framework cloudformation --compact --quiet
+
+  docker:
+    name: Dockerfile (hadolint, checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: task2-cloud-security-check/hardened/Dockerfile
+          failure-threshold: warning
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install checkov
+
+      - name: Checkov
+        run: |
+          checkov -f task2-cloud-security-check/hardened/Dockerfile \
+            --framework dockerfile --compact --quiet
+
+  go:
+    name: Go scanner (build, vet, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: task3-go-cloud-scanner
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: task3-go-cloud-scanner/go.sum
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./... -race -cover
+
+      - name: Golden fixture scan still matches the schema
+        run: go run . -fixture testdata/fixture.json | diff - testdata/expected-report.json
+
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: task4-dependency-audit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The supplied manifest is knowingly vulnerable and is kept as evidence,
+      # so the audit runs against the remediated one -- which must stay clean.
+      - name: Audit the remediated manifest
+        run: |
+          mkdir -p /tmp/fixed && cp package.fixed.json /tmp/fixed/package.json
+          cd /tmp/fixed
+          npm install --package-lock-only --no-audit --no-fund
+          npm audit --audit-level=low
+
+      - name: Regenerate the reports for the supplied manifest
+        run: |
+          python3 audit_report.py --input reports/npm-audit.json \
+            --csv /tmp/vulnerabilities.csv --json /tmp/audit-report.json
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks needs history to scan past commits
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

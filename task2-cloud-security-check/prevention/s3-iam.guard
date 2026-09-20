@@ -1,0 +1,56 @@
+##############################################################################
+# AWS CloudFormation Guard rules (cfn-guard v3).
+
+let s3_buckets = Resources.*[ Type == 'AWS::S3::Bucket' ]
+let iam_users  = Resources.*[ Type == 'AWS::IAM::User' ]
+let iam_policy_carriers = Resources.*[ Type in [ 'AWS::IAM::Role', 'AWS::IAM::Policy', 'AWS::IAM::ManagedPolicy' ] ]
+
+rule S3_MUST_BLOCK_PUBLIC_ACCESS when %s3_buckets !empty {
+  %s3_buckets.Properties.PublicAccessBlockConfiguration exists
+  %s3_buckets.Properties.PublicAccessBlockConfiguration {
+    BlockPublicAcls == true
+    BlockPublicPolicy == true
+    IgnorePublicAcls == true
+    RestrictPublicBuckets == true
+  }
+  <<
+    violation: every S3 bucket must block public access at the bucket level.
+    fix: add all four PublicAccessBlockConfiguration flags set to true.
+  >>
+}
+
+rule S3_MUST_BE_ENCRYPTED when %s3_buckets !empty {
+  %s3_buckets.Properties.BucketEncryption exists
+  <<
+    violation: S3 bucket has no default encryption configuration.
+    fix: set BucketEncryption with SSEAlgorithm aws:kms (preferred) or AES256.
+  >>
+}
+
+rule S3_MUST_BE_VERSIONED when %s3_buckets !empty {
+  %s3_buckets.Properties.VersioningConfiguration.Status == 'Enabled'
+  <<
+    violation: versioning is required so that an overwrite or ransomware event is recoverable.
+  >>
+}
+
+rule NO_IAM_USERS when %iam_users !empty {
+  %iam_users empty
+  <<
+    violation: IAM users mean long-lived access keys. Use a role with sts:AssumeRole,
+               IAM Identity Center, or OIDC federation for CI.
+  >>
+}
+
+rule NO_WILDCARD_ACTIONS when %iam_policy_carriers !empty {
+  %iam_policy_carriers.Properties.Policies[*].PolicyDocument.Statement[ Effect == 'Allow' ] {
+    Action != '*'
+    Action !in [ ['*'] ]
+    Resource != '*'
+    Resource !in [ ['*'] ]
+  }
+  <<
+    violation: an Allow statement grants Action "*" or Resource "*".
+    fix: name the actions and scope them to specific ARNs.
+  >>
+}

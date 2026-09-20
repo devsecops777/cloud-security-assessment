@@ -1,0 +1,79 @@
+{
+  "_comment": [
+    "Gate #4: AWS Organizations Service Control Policy. CI can be skipped and a",
+    "console click can bypass a pipeline, an SCP cannot -- it removes the",
+    "permission from every principal in the account, including its root user.",
+    "Attach to the workload OU, never to the management account."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyDisablingS3PublicAccessBlock",
+      "Effect": "Deny",
+      "Action": [
+        "s3:PutAccountPublicAccessBlock",
+        "s3:DeleteAccountPublicAccessBlock"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "ArnNotLike": {
+          "aws:PrincipalArn": "arn:aws:iam::*:role/PlatformSecurityBreakGlass"
+        }
+      }
+    },
+    {
+      "Sid": "DenyPublicBucketAcls",
+      "Effect": "Deny",
+      "Action": ["s3:PutBucketAcl", "s3:PutObjectAcl"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "s3:x-amz-acl": ["public-read", "public-read-write", "authenticated-read"]
+        }
+      }
+    },
+    {
+      "Sid": "DenyLongLivedIamUserCredentials",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreateUser",
+        "iam:CreateAccessKey",
+        "iam:CreateLoginProfile"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "ArnNotLike": {
+          "aws:PrincipalArn": "arn:aws:iam::*:role/PlatformSecurityBreakGlass"
+        }
+      }
+    },
+    {
+      "Sid": "DenyTurningOffTheAuditTrail",
+      "Effect": "Deny",
+      "Action": [
+        "cloudtrail:StopLogging",
+        "cloudtrail:DeleteTrail",
+        "cloudtrail:UpdateTrail",
+        "config:DeleteConfigurationRecorder",
+        "config:StopConfigurationRecorder",
+        "guardduty:DeleteDetector",
+        "guardduty:DisassociateFromMasterAccount"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyUnencryptedS3Uploads",
+      "Effect": "Deny",
+      "Action": "s3:PutObject",
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": {
+          "s3:x-amz-server-side-encryption": ["aws:kms", "AES256"]
+        },
+        "Null": {
+          "s3:x-amz-server-side-encryption": "false"
+        }
+      }
+    }
+  ]
+}

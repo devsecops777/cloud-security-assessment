@@ -1,0 +1,24 @@
+# Everything is excluded first, then only what the build needs is re-included.
+# An allow-list is the only reliable way to keep a stray .env or key file out of
+# the build context -- and out of any image layer or leaked build cache.
+*
+
+!app/
+app/**/__pycache__/
+app/**/*.pyc
+
+# Belt and braces: even if the allow-list above is widened later, none of these
+# can be added back by accident.
+**/.git
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/id_rsa*
+**/.aws
+**/.ssh
+**/node_modules
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*

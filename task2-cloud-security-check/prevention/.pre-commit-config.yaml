@@ -1,0 +1,45 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+      - id: detect-aws-credentials
+        args: [--allow-missing-credentials]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/bridgecrewio/checkov
+    rev: 3.2.334
+    hooks:
+      - id: checkov
+        args:
+          - --quiet
+          - --compact
+          - --skip-download
+          - --framework
+          - terraform,cloudformation,dockerfile,github_actions
+
+  - repo: https://github.com/aws-cloudformation/cfn-lint
+    rev: v1.22.3
+    hooks:
+      - id: cfn-lint
+        files: task2-cloud-security-check/.*\.(yaml|yml)$
+
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint-docker
+
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.2
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+      - id: terraform_tflint
