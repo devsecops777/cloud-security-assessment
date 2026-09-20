@@ -19,9 +19,9 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: 1.9.8
 
@@ -34,33 +34,36 @@ jobs:
           terraform init -backend=false -input=false
           terraform validate
 
-      - name: Checkov
-        uses: bridgecrewio/checkov-action@master
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          directory: task1-terraform-gcp
-          framework: terraform
-          soft_fail: false
-          output_format: cli,sarif
-          output_file_path: console,checkov-terraform.sarif
+          python-version: "3.12"
+      # --require-hashes rejects any package whose download does not match the
+      # locked hash, covering the whole transitive tree. See .github/requirements.in.
+      - run: pip install --require-hashes -r .github/requirements.txt
+      - name: Checkov
+        run: |
+          checkov -d task1-terraform-gcp --framework terraform --compact             --output cli --output sarif --output-file-path console,results.sarif
 
       - name: Upload SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
-          sarif_file: checkov-terraform.sarif
+          sarif_file: results.sarif
           category: checkov-terraform
 
   cloudformation:
     name: CloudFormation (cfn-lint, checkov)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
-      - run: pip install cfn-lint checkov
+      # --require-hashes rejects any package whose download does not match the
+      # locked hash, covering the whole transitive tree. See .github/requirements.in.
+      - run: pip install --require-hashes -r .github/requirements.txt
 
       # Only the hardened template is expected to pass. vulnerable/ is kept as
       # the "before" evidence and is excluded on purpose.
@@ -76,19 +79,21 @@ jobs:
     name: Dockerfile (hadolint, checkov)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: hadolint
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
         with:
           dockerfile: task2-cloud-security-check/hardened/Dockerfile
           failure-threshold: warning
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
-      - run: pip install checkov
+      # --require-hashes rejects any package whose download does not match the
+      # locked hash, covering the whole transitive tree. See .github/requirements.in.
+      - run: pip install --require-hashes -r .github/requirements.txt
 
       - name: Checkov
         run: |
@@ -102,9 +107,9 @@ jobs:
       run:
         working-directory: task3-go-cloud-scanner
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25"
           cache-dependency-path: task3-go-cloud-scanner/go.sum
@@ -126,13 +131,13 @@ jobs:
       run:
         working-directory: task4-dependency-audit
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
@@ -154,10 +159,10 @@ jobs:
     name: Secret scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # gitleaks needs history to scan past commits
 
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
